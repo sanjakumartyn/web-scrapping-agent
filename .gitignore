@@ -1,0 +1,49 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, coverage, and type-checking caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.tox/
+
+# Build and packaging output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs and runtime files
+*.log
+logs/
+*.pid
+
+# Browser automation artifacts
+.playwright/
+playwright-report/
+test-results/
+
+# Local editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
