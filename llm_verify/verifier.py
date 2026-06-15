@@ -6,14 +6,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+client = genai.Client(api_key=GOOGLE_API_KEY) if GOOGLE_API_KEY else None
 
 
 def llm_verify(signal: Dict) -> Optional[Dict]:
-    """Ask gpt-4o-mini whether a sentence indicates a useful business signal.
+    """Ask Gemini whether a sentence indicates a useful business signal.
 
     Expects `signal` to include 'signal_type' and 'raw_snippet'. Calls the LLM
     and expects a JSON response like: {"is_signal": bool, "confidence": float, "reason": str}
@@ -29,13 +31,16 @@ def llm_verify(signal: Dict) -> Optional[Dict]:
             'Reply ONLY with JSON: {"is_signal": bool, "confidence": float, "reason": str}'
         )
 
-        model = genai.GenerativeModel('gemini-1.5-pro')
-        resp = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
+        if client is None:
+            raise RuntimeError("GOOGLE_API_KEY is not set")
+
+        resp = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
                 temperature=0,
                 max_output_tokens=80,
-            )
+            ),
         )
 
         text = resp.text
