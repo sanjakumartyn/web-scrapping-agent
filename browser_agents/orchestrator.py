@@ -7,6 +7,7 @@ from layer1_agents.browser_agents.news_agent import collect_news
 from layer1_agents.browser_agents.report_agent import collect_report
 from layer1_agents.browser_agents.hiring_agent import collect_hiring
 from layer1_agents.browser_agents.esg_agent import collect_esg
+from layer1_agents.browser_agents.company_profile_agent import collect_company_profile
 
 
 async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
@@ -30,6 +31,7 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
         collect_report(company_name, cfg.get("investor_url")),
         collect_hiring(company_name),
         collect_esg(company_name, cfg.get("website")),
+        collect_company_profile(company_name, cfg.get("website")),
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -39,6 +41,21 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
         (results[2], "hiring"),
         (results[3], "esg"),
     ]
+    company_profile = results[4] if len(results) > 4 else {}
+    if isinstance(company_profile, Exception):
+        print(f"Agent company_profile failed: {company_profile}")
+        company_profile = {
+            "company_name": company_name,
+            "website": cfg.get("website"),
+            "description": "",
+            "products": [],
+            "services": [],
+            "brands": [],
+            "industries_served": [],
+            "business_segments": [],
+            "source_urls": [],
+            "confidence_score": 0.0,
+        }
 
     source_outputs: List[Dict[str, Any]] = []
     all_signals: List[Dict[str, Any]] = []
@@ -79,6 +96,7 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
         "status": "completed",
         "signal_count": len(all_signals),
         "signals": all_signals,
+        "company_profile": company_profile,
         "sources": source_outputs,
     }
 
