@@ -1,7 +1,26 @@
 """Direct Playwright-based web scraping without LLM reasoning."""
 import asyncio
 from typing import Optional
+import requests
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
+
+
+HTTP_SCRAPE_TIMEOUT_SECONDS = 5
+HTTP_MIN_TEXT_CHARS = 250
+
+
+def _scrape_url_http(url: str) -> str:
+    response = requests.get(
+        url,
+        timeout=HTTP_SCRAPE_TIMEOUT_SECONDS,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    for element in soup(["script", "style", "noscript"]):
+        element.decompose()
+    return soup.get_text("\n", strip=True)
 
 
 async def scrape_url(url: str, timeout: int = 30000) -> str:
@@ -15,14 +34,22 @@ async def scrape_url(url: str, timeout: int = 30000) -> str:
         Text content from the page, or empty string on failure.
     """
     try:
+        http_text = await asyncio.to_thread(_scrape_url_http, url)
+        if http_text and len(http_text) >= HTTP_MIN_TEXT_CHARS:
+            return http_text
+    except Exception:
+        pass
+
+    try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
+            await page.route("**/*", _block_heavy_assets)
 
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-                # Wait for content to load
-                await asyncio.sleep(2)
+                # Give dynamic text a short settle window without holding the pipeline.
+                await asyncio.sleep(0.75)
                 # Extract all text content
                 text = await page.evaluate("() => document.body.innerText")
                 return str(text or "")
@@ -31,6 +58,13 @@ async def scrape_url(url: str, timeout: int = 30000) -> str:
     except Exception as e:
         print(f"scrape_url error for {url}: {e}")
         return ""
+
+
+async def _block_heavy_assets(route) -> None:
+    if route.request.resource_type in {"image", "media", "font"}:
+        await route.abort()
+        return
+    await route.continue_()
 
 
 async def google_news_search(query: str) -> str:
@@ -49,8 +83,8 @@ async def google_news_search(query: str) -> str:
             page = await browser.new_page()
 
             try:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await asyncio.sleep(2)
+                await page.goto(url, wait_until="domcontentloaded", timeout=10000)
+                await asyncio.sleep(1)
 
                 # Extract article headlines and snippets
                 articles = await page.evaluate("""

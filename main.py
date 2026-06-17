@@ -24,6 +24,7 @@ class AnalyseRequest(BaseModel):
     account_id: str
 
 
+@app.post("/analyse/", include_in_schema=False)
 @app.post("/analyse")
 def analyse(req: AnalyseRequest) -> Dict[str, Any]:
     """Run agent collectors synchronously and return raw source details.
@@ -37,6 +38,14 @@ def analyse(req: AnalyseRequest) -> Dict[str, Any]:
         source_count = len(result.get("sources", [])) if isinstance(result, dict) else 0
         print(f"analyse: collected raw details from {source_count} sources")
         if isinstance(result, dict):
+            if result.get("dashboard_ready") and result.get("account_intelligence"):
+                result["signal_count"] = len(result.get("signals", []))
+                result["raw_signal_count"] = result.get(
+                    "legacy_rule_signal_count",
+                    len(result.get("legacy_rule_signals", [])),
+                )
+                return result
+
             raw_signals = result.get("signals", [])
             cleaned_signals = process_signals([
                 {

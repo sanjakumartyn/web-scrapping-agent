@@ -142,7 +142,7 @@ async def _collect_news_api(company_name: str) -> str:
     try:
         company_cfg = get_company_config(company_name)
         search_requests = _build_search_requests(company_name, company_cfg.get("website"))
-        timeout = aiohttp.ClientTimeout(total=30)
+        timeout = aiohttp.ClientTimeout(total=12)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             results = await asyncio.gather(

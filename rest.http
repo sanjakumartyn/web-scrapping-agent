@@ -3,6 +3,6 @@ POST http://localhost:8004/analyse
 Content-Type: application/json
 
 {
-  "company_name": "Asian Paints",
-  "account_id": "asian_paints_001"
+  "company_name": "cipla",
+  "account_id": "cipla_001"
 }

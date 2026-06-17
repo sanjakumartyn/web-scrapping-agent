@@ -1,5 +1,10 @@
 """Browser agent that scrapes sustainability/ESG content from company website."""
+import asyncio
+
 from layer1_agents.browser_agents.playwright_scraper import scrape_url
+
+
+ESG_PAGE_TIMEOUT_MS = 4000
 
 
 async def collect_esg(company_name: str, website: str) -> str:
@@ -12,27 +17,31 @@ async def collect_esg(company_name: str, website: str) -> str:
     Errors are caught and an empty string is returned on failure.
     """
     try:
-        # Try common ESG/sustainability page paths
+        if not website:
+            return ""
+
+        # Try the configured URL first. Some companies use a separate ESG domain.
+        direct_content = await scrape_url(website, timeout=ESG_PAGE_TIMEOUT_MS)
+        if direct_content and len(direct_content) > 100:
+            return direct_content
+
         paths = [
             "/sustainability",
             "/esg",
-            "/environment",
-            "/corporate-social-responsibility",
             "/csr",
-            "/green",
+            "/corporate-social-responsibility",
         ]
 
-        for path in paths:
-            url = website.rstrip("/") + path
-            try:
-                content = await scrape_url(url, timeout=20000)
-                if content and len(content) > 100:  # Only return if substantial
-                    return content
-            except:
+        results = await asyncio.gather(
+            *[scrape_url(website.rstrip("/") + path, timeout=ESG_PAGE_TIMEOUT_MS) for path in paths],
+            return_exceptions=True,
+        )
+        for content in results:
+            if isinstance(content, Exception):
                 continue
-
-        # Fallback: scrape homepage
-        return await scrape_url(website, timeout=20000)
+            if content and len(content) > 100:
+                return str(content)
+        return direct_content or ""
     except Exception as e:
         print(f"esg_agent error: {e}")
         return ""

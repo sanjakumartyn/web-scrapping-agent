@@ -8,8 +8,9 @@ from urllib.parse import quote_plus
 
 COMPANY_CONFIG: Dict[str, Dict[str, str]] = {
     "asian paints": {
-        "investor_url": "https://www.asianpaints.com/investors.html",
+        "investor_url": "https://www.asianpaints.com/more/investors.html",
         "website": "https://www.asianpaints.com",
+        "esg_url": "https://sustainability.asianpaints.com",
         "careers_url": "https://www.asianpaints.com/careers.html",
     },
     "dcm shriram": {

@@ -1,8 +1,11 @@
 """Browser agent that extracts a structured profile from official company pages."""
+import asyncio
 import re
 from typing import Any, Dict, List, Set
 from urllib.parse import urljoin, urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from layer1_agents.utils.text_processing import TextProcessor
@@ -82,22 +85,35 @@ ITEM_SKIP_PATTERNS = [
 GENERIC_ITEM_NAMES = {
     "about",
     "all",
+    "beige",
+    "black",
+    "blue",
     "brands",
     "business",
     "calculators",
     "careers",
     "company",
     "explore",
+    "green",
+    "grey",
+    "greys",
     "home",
     "more",
     "next",
     "now",
+    "orange",
+    "pink",
     "previous",
     "products",
+    "purple",
+    "red",
     "professionals",
     "services",
     "solutions",
     "sustainability",
+    "white",
+    "whites",
+    "yellow",
 }
 
 DESCRIPTION_SKIP_PATTERNS = [
@@ -115,10 +131,10 @@ DESCRIPTION_SKIP_PATTERNS = [
     "menu",
 ]
 
-PROFILE_NAVIGATION_TIMEOUT_MS = 30000
-PROFILE_NETWORK_IDLE_WAIT_MS = 6000
-PROFILE_TEXT_WAIT_MS = 10000
-PROFILE_SETTLE_WAIT_MS = 3000
+PROFILE_NAVIGATION_TIMEOUT_MS = 15000
+PROFILE_NETWORK_IDLE_WAIT_MS = 2000
+PROFILE_TEXT_WAIT_MS = 5000
+PROFILE_SETTLE_WAIT_MS = 1000
 MIN_PROFILE_TEXT_CHARS = 300
 
 
@@ -289,6 +305,59 @@ async def _scrape_profile_page(page: Any, url: str, timeout: int) -> Dict[str, A
     return data
 
 
+def _scrape_profile_page_http(url: str, timeout: int = 8) -> Dict[str, Any]:
+    response = requests.get(
+        url,
+        timeout=timeout,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    for element in soup(["script", "style", "noscript"]):
+        element.decompose()
+
+    meta_description = ""
+    meta = soup.find("meta", attrs={"name": "description"})
+    if meta:
+        meta_description = meta.get("content", "")
+
+    links = [
+        urljoin(response.url, anchor.get("href"))
+        for anchor in soup.find_all("a", href=True)
+    ]
+
+    return {
+        "title": soup.title.get_text(" ", strip=True) if soup.title else "",
+        "meta_description": meta_description,
+        "text": soup.get_text("\n", strip=True),
+        "links": links,
+        "url": response.url,
+    }
+
+
+async def _scrape_profile_page_fast(page: Any, url: str, timeout: int) -> Dict[str, Any]:
+    try:
+        http_data = await asyncio.to_thread(
+            _scrape_profile_page_http,
+            url,
+            min(8, max(3, timeout // 1000)),
+        )
+        if len(http_data.get("text", "").strip()) >= MIN_PROFILE_TEXT_CHARS:
+            return http_data
+    except Exception as e:
+        print(f"collect_company_profile HTTP fallback skipped {url}: {e}")
+
+    return await _scrape_profile_page(page, url, timeout)
+
+
+async def _block_heavy_assets(route: Any) -> None:
+    if route.request.resource_type in {"image", "media", "font"}:
+        await route.abort()
+        return
+    await route.continue_()
+
+
 def _rank_urls(urls: Set[str], website: str) -> List[str]:
     def score(url: str) -> int:
         lowered = url.lower()
@@ -313,12 +382,13 @@ async def collect_company_profile(company_name: str, website: str, max_pages: in
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
+            await page.route("**/*", _block_heavy_assets)
             try:
                 candidates: Set[str] = {website}
                 for path in COMMON_PROFILE_PATHS:
                     candidates.add(urljoin(website.rstrip("/") + "/", path.lstrip("/")))
 
-                homepage = await _scrape_profile_page(page, website, timeout=PROFILE_NAVIGATION_TIMEOUT_MS)
+                homepage = await _scrape_profile_page_fast(page, website, timeout=PROFILE_NAVIGATION_TIMEOUT_MS)
                 pages: List[Dict[str, Any]] = [homepage]
 
                 for link in homepage.get("links", []):
@@ -332,7 +402,7 @@ async def collect_company_profile(company_name: str, website: str, max_pages: in
                     if url == website or not _same_domain(url, website):
                         continue
                     try:
-                        pages.append(await _scrape_profile_page(page, url, timeout=PROFILE_NAVIGATION_TIMEOUT_MS))
+                        pages.append(await _scrape_profile_page_fast(page, url, timeout=PROFILE_NAVIGATION_TIMEOUT_MS))
                     except Exception as e:
                         print(f"collect_company_profile page skipped {url}: {e}")
 

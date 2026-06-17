@@ -1,13 +1,15 @@
 """Orchestrator to run all browser agents, then filter outputs with rules."""
 import asyncio
 from typing import Dict, List, Any
-from layer1_agents.rule_engine.hybrid_pipeline import run_hybrid_pipeline
+from layer1_agents.analysis_agents import run_signal_analysis
 from layer1_agents.config.company_config import get_company_config
+from layer1_agents.db.in_memory import save_signals as save_signals_in_memory
 from layer1_agents.browser_agents.news_agent import collect_news
 from layer1_agents.browser_agents.report_agent import collect_report
 from layer1_agents.browser_agents.hiring_agent import collect_hiring
 from layer1_agents.browser_agents.esg_agent import collect_esg
 from layer1_agents.browser_agents.company_profile_agent import collect_company_profile
+from layer1_agents.rule_engine.extractor import run_rule_engine
 
 
 async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
@@ -30,8 +32,8 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
         collect_news(company_name),
         collect_report(company_name, cfg.get("investor_url")),
         collect_hiring(company_name),
-        collect_esg(company_name, cfg.get("website")),
-        collect_company_profile(company_name, cfg.get("website")),
+        collect_esg(company_name, cfg.get("esg_url") or cfg.get("website")),
+        collect_company_profile(company_name, cfg.get("website"), max_pages=2),
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -58,11 +60,13 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
         }
 
     source_outputs: List[Dict[str, Any]] = []
-    all_signals: List[Dict[str, Any]] = []
+    raw_source_map: Dict[str, str] = {}
+    rule_signals: List[Dict[str, Any]] = []
 
     for raw, source_type in sources:
         if isinstance(raw, Exception):
             print(f"Agent {source_type} failed: {raw}")
+            raw_source_map[source_type] = ""
             source_outputs.append(
                 {
                     "source_type": source_type,
@@ -74,6 +78,8 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
             continue
 
         print(f"Agent {source_type} returned: {len(raw) if raw else 0} chars")
+        raw_text = raw or ""
+        raw_source_map[source_type] = raw_text
         if not raw:
             # empty result: nothing to process
             print(f"Agent {source_type} returned empty, skipping")
@@ -86,16 +92,32 @@ async def run_all_agents(company_name: str, account_id: str) -> Dict[str, Any]:
             }
         )
 
-        confirmed = run_hybrid_pipeline(raw, source_type, account_id)
+        confirmed, _ambiguous = run_rule_engine(raw_text, source_type, account_id)
         if confirmed:
-            all_signals.extend(confirmed)
+            rule_signals.extend(confirmed)
+
+    account_intelligence = await run_signal_analysis(
+        company_name=company_name,
+        account_id=account_id,
+        raw_sources=raw_source_map,
+        company_profile=company_profile,
+        rule_signals=rule_signals,
+        timeout_seconds=20,
+    )
+    final_signals = account_intelligence.get("signals", [])
+    if final_signals:
+        save_signals_in_memory(final_signals, account_id)
 
     return {
         "account_id": account_id,
         "company_name": company_name,
         "status": "completed",
-        "signal_count": len(all_signals),
-        "signals": all_signals,
+        "dashboard_ready": True,
+        "signal_count": len(final_signals),
+        "signals": final_signals,
+        "account_intelligence": account_intelligence,
+        "legacy_rule_signal_count": len(rule_signals),
+        "legacy_rule_signals": rule_signals,
         "company_profile": company_profile,
         "sources": source_outputs,
     }

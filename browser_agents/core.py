@@ -29,7 +29,7 @@ async def run_browser_task(task: str, max_steps: int = 15) -> str:
     try:
         # Create LLM instance for the agent
         llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro",
+            model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
             temperature=0.2,
             google_api_key=GOOGLE_API_KEY
         )
